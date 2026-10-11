@@ -5,19 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/Autumn-27/norma/harness"
+	"github.com/Autumn-27/norma/llm"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/sebastian93921/artifex/agent"
 	"github.com/sebastian93921/artifex/db"
 	"github.com/sebastian93921/artifex/intercept"
 	"github.com/sebastian93921/artifex/locale"
-	"github.com/Autumn-27/norma/harness"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // isFKViolation reports whether err is a Postgres foreign-key violation (SQLSTATE
@@ -134,6 +135,13 @@ type Engine struct {
 	// the message to the model (blocking that call) so it re-plans — no kill needed.
 	steerMu  sync.Mutex
 	steerBox map[int64][]string
+
+	// max_active_tasks activation snapshot (5s TTL): which running tasks may
+	// claim/plan under the concurrency cap, admitted oldest-first by id.
+	gateMu      sync.Mutex
+	gateAt      time.Time
+	gateIDs     []int64
+	gateAllowed map[int64]bool
 
 	plannerRound sync.Map // taskID -> int, planner round counter (for UI round separators)
 
@@ -829,6 +837,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		if e.IsDeleting(t.ID) {
 			return
 		}
+		if !e.taskActivationAllowed(t) {
+			return // Parked under max_active_tasks: no planning rounds until admitted.
+		}
 		// terminal task (goals all met → done, or failed): the run is over. A
 		// resume/nudge — e.g. auto-resume of the active task on restart — must NOT
 		// re-plan (it would burn an LLM round and re-confirm a settled result).
@@ -943,6 +954,12 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 				return
 			}
 			continue // During timeout settlement, claim no new intents; active workers wrap up while the coordinator drains them.
+		}
+		if !e.taskActivationAllowed(t) {
+			if sleepCtx(ctx, 2*time.Second) {
+				return
+			}
+			continue // Parked: another running task holds one of the max_active_tasks slots.
 		}
 		if isTerminalStatus(e.m.TaskStatus(t.ID)) {
 			if sleepCtx(ctx, 1000*time.Millisecond) {
@@ -1234,6 +1251,49 @@ func sleepCtx(ctx context.Context, d time.Duration) (done bool) {
 	case <-time.After(d):
 		return false
 	}
+}
+
+// gateTTL gates the activation snapshot's freshness.
+const gateTTL = 5 * time.Second
+
+// taskActivationAllowed reports whether the task may claim intents / plan
+// rounds under the max_active_tasks cap (0 = unlimited). Running tasks are
+// admitted oldest-first by id, so finishing a task releases the next one.
+// The snapshot is cached for gateTTL — the loops poll every sub-second.
+func (e *Engine) taskActivationAllowed(t *Task) bool {
+	maxActive := e.m.MaxActiveTasks()
+	if maxActive <= 0 {
+		return true
+	}
+	taskID, err := strconv.ParseInt(t.ID, 10, 64)
+	if err != nil {
+		return true // non-numeric task ids are not part of the cap's ordering
+	}
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	now := time.Now()
+	if e.gateIDs == nil || now.Sub(e.gateAt) > gateTTL {
+		tasks, err := e.m.pg.ListTasks()
+		if err != nil {
+			return e.gateAllowed[taskID] // stale snapshot on error; fail open for known tasks
+		}
+		ids := make([]int64, 0, len(tasks))
+		for _, t := range tasks {
+			if t != nil && t.Status == "running" {
+				ids = append(ids, t.ID)
+			}
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		e.gateIDs = ids
+		e.gateAt = now
+		e.gateAllowed = map[int64]bool{}
+		for rank, id := range ids {
+			if rank < maxActive {
+				e.gateAllowed[id] = true
+			}
+		}
+	}
+	return e.gateAllowed[taskID]
 }
 
 func (e *Engine) claimNext(t *Task, name string) *db.Node {

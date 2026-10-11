@@ -19,6 +19,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Autumn-27/norma/llm"
+	actool "github.com/Autumn-27/norma/tool"
+	"github.com/Autumn-27/norma/transcript"
 	"github.com/sebastian93921/artifex/agent"
 	"github.com/sebastian93921/artifex/db"
 	"github.com/sebastian93921/artifex/intercept"
@@ -27,9 +30,6 @@ import (
 	"github.com/sebastian93921/artifex/locale"
 	"github.com/sebastian93921/artifex/report"
 	"github.com/sebastian93921/artifex/traffic"
-	"github.com/Autumn-27/norma/llm"
-	actool "github.com/Autumn-27/norma/tool"
-	"github.com/Autumn-27/norma/transcript"
 )
 
 // BuildVersion is the backend application version, injected from cmd/artifex at
@@ -99,12 +99,12 @@ type Server struct {
 	// limiter. applyLLM also resolves the persisted global-active profile through this
 	// cache, so global fallback and task chains do not accidentally double the
 	// configured request rate. Cleared on profile edits, then repopulated by active reapply.
-	provCacheMu   sync.Mutex
+	provCacheMu sync.Mutex
 	// profileLimiters caches each profile's llmpool.Limiter so callers can lease a
 	// slot for a whole run (see taskLLMRuntime.SlotLeaseHook) instead of per call.
 	profileLimiters sync.Map // profileID (int64) -> *llmpool.Limiter
-	provByProfile map[int64]*provEntry
-	provCacheGen  uint64
+	provByProfile   map[int64]*provEntry
+	provCacheGen    uint64
 
 	// llmHealth is the process-wide circuit-breaker state for LLM failover.
 	// It deliberately lives OUTSIDE the provider caches: rebuilding the chain
@@ -3337,6 +3337,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
 		"llm_record":               s.m.LLMRecordEnabled(),
 		"slot_lease":               s.m.SlotLeaseEnabled(),
+		"max_active_tasks":         s.m.MaxActiveTasks(),
 		"web_search_enabled":       on,
 		"web_search_backend":       backend,
 		"brave_key_set":            strings.TrimSpace(braveKey) != "",
@@ -3407,8 +3408,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		Language            *string `json:"language"`
 		TrafficCapture      *bool   `json:"traffic_capture"`
 		AgentTrafficBinding *bool   `json:"agent_traffic_binding"`
-		LLMRecord           *bool   `json:"llm_record"` // LLM recording defaults off and changes immediately without rebuilding agents.
-		SlotLease           *bool   `json:"slot_lease"` // Slot leases reserve a profile slot per intent run; waits happen before the intent clock starts.
+		LLMRecord           *bool   `json:"llm_record"`       // LLM recording defaults off and changes immediately without rebuilding agents.
+		SlotLease           *bool   `json:"slot_lease"`       // Slot leases reserve a profile slot per intent run; waits happen before the intent clock starts.
+		MaxActiveTasks      *int    `json:"max_active_tasks"` // Cap on concurrently running tasks (0 = unlimited); parked tasks claim nothing and plan nothing.
 		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey
 		// are optional — omit (null) to leave a stored key untouched, send "" to clear.
 		WebSearchEnabled *bool   `json:"web_search_enabled"`
@@ -3538,6 +3540,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if req.SlotLease != nil {
 		if err := s.m.SetSlotLeaseEnabled(*req.SlotLease); err != nil {
 			writeError(w, 500, err)
+			return
+		}
+	}
+	if req.MaxActiveTasks != nil {
+		if err := s.m.SetMaxActiveTasks(*req.MaxActiveTasks); err != nil {
+			writeError(w, 400, err)
 			return
 		}
 	}

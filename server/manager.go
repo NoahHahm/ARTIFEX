@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	actool "github.com/Autumn-27/norma/tool"
 	"github.com/sebastian93921/artifex/agent"
 	pgdb "github.com/sebastian93921/artifex/db"
 	"github.com/sebastian93921/artifex/enrich"
@@ -21,7 +22,6 @@ import (
 	"github.com/sebastian93921/artifex/intercept"
 	"github.com/sebastian93921/artifex/locale"
 	"github.com/sebastian93921/artifex/traffic"
-	actool "github.com/Autumn-27/norma/tool"
 )
 
 // Task is one engagement: a description + goal + its own exploration store,
@@ -336,6 +336,31 @@ func (m *Manager) SetWorkers(n int) error {
 		return locale.Errorf("workers must be greater than zero")
 	}
 	return m.pg.SetSetting(settingWorkers, strconv.Itoa(n))
+}
+
+// settingMaxActiveTasks caps how many tasks run at once (0 = unlimited).
+// Running tasks are admitted oldest-first (by id); parked tasks keep their
+// runners alive but claim no intents and plan no rounds, so their workers and
+// planner idle until an earlier task finishes and a slot frees up.
+const settingMaxActiveTasks = "max_active_tasks"
+
+func (m *Manager) MaxActiveTasks() int {
+	v, ok, err := m.pg.GetSetting(settingMaxActiveTasks)
+	if err != nil || !ok {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+func (m *Manager) SetMaxActiveTasks(n int) error {
+	if n < 0 {
+		return locale.Errorf("max_active_tasks must be zero or greater")
+	}
+	return m.pg.SetSetting(settingMaxActiveTasks, strconv.Itoa(n))
 }
 
 // SlotLeaseEnabled reports whether intents lease an LLM slot for their whole
