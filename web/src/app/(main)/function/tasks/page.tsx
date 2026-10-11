@@ -234,6 +234,7 @@ function fmtDateTime(unix?: number): string {
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
   { value: "created", get label() { return swt("interface.m0826"); } },
   { value: "queued", get label() { return swt("interface.m0827"); } },
+  { value: "pending", get label() { return swt("interface.m2878"); } },
   { value: "running", get label() { return swt("interface.m0096"); } },
   { value: "paused", get label() { return swt("interface.m0564"); } },
   { value: "done", get label() { return swt("interface.m0809"); } },

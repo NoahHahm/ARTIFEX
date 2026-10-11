@@ -50,6 +50,7 @@ const intent: Record<string, StatusMeta> = {
 const task: Record<string, StatusMeta> = {
   created: { get label() { return swt("interface.m0826"); }, tone: "slate" },
   queued: { get label() { return swt("interface.m0827"); }, tone: "amber" },
+  pending: { get label() { return swt("interface.m2878"); }, tone: "amber" },
   running: { get label() { return swt("interface.m0096"); }, tone: "blue" },
   paused: { get label() { return swt("interface.m0564"); }, tone: "amber" },
   done: { get label() { return swt("interface.m0809"); }, tone: "green" },

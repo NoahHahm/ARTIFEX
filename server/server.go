@@ -1121,6 +1121,13 @@ func (s *Server) resolvedTaskStatus(t *Task) string {
 		// an exhausted task running lets the user edit/reset its chain directly.
 		return "running"
 	case s.engine.ReadyFor(t) && s.engine.Started(t.ID):
+		// Parked under max_active_tasks: alive but waiting for its turn.
+		// Reported as pending so the UI shows the queue position honestly;
+		// internally the task stays running (pause/resume/reload semantics
+		// are untouched).
+		if !s.engine.taskActivationAllowed(t) {
+			return "pending"
+		}
 		return "running"
 	default:
 		return "created"
