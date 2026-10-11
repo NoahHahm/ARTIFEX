@@ -1277,9 +1277,12 @@ func (e *Engine) taskActivationAllowed(t *Task) bool {
 		if err != nil {
 			return e.gateAllowed[taskID] // stale snapshot on error; fail open for known tasks
 		}
+		// Paused tasks don't consume an active slot: the user parked them
+		// deliberately, and admitting a paused task would stall the whole
+		// queue (its workers claim nothing while later tasks stay parked).
 		ids := make([]int64, 0, len(tasks))
 		for _, t := range tasks {
-			if t != nil && t.Status == "running" {
+			if t != nil && t.Status == "running" && !t.Paused {
 				ids = append(ids, t.ID)
 			}
 		}
