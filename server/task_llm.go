@@ -225,6 +225,21 @@ func (r *taskLLMRuntime) contextWindowK() int {
 	return cfg.ContextWindowK
 }
 
+// holdCapable resolves the task's CURRENT limiter (per compaction run —
+// failover-safe). The limiter exposes the slot-hold + per-call ceiling the
+// compactor needs; the task's provider itself is a failover chain that hides it.
+func (r *taskLLMRuntime) holdCapable() agent.HoldCapable {
+	sel, err := r.current()
+	if err != nil || sel.profileID == 0 {
+		return nil
+	}
+	lim, ok := r.s.limiterForProfile(sel.profileID)
+	if !ok {
+		return nil
+	}
+	return lim
+}
+
 func parseTaskID(id string) (int64, error) {
 	n, err := strconv.ParseInt(id, 10, 64)
 	if err != nil || n <= 0 {
@@ -625,6 +640,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	// chain using the agent's model; compaction generates the body with one Complete call.
 	taskCompactor := agent.NewCompactor(plannerRuntime, "task-router")
 	taskCompactor.SetMaxTokensForContext(plannerRuntime.contextWindowK())
+	taskCompactor.SetHoldResolver(plannerRuntime.holdCapable)
 	pl.SetCompactor(taskCompactor)
 	main := agent.NewMainAgent(mainRuntime, "task-router", s.m.dir, tx, mainRuntime.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	main.SetFindingRecorder(s.evidenceStore())

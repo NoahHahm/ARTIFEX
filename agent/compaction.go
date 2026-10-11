@@ -44,6 +44,8 @@ type Compactor struct {
 	// Sized from the model's context window (SetMaxTokensForContext) because
 	// reasoning models spend a large uncontrolled share before any content.
 	bodyMaxTokens int
+	// holdRes resolves the slot-capable provider per compaction run.
+	holdRes func() HoldCapable
 
 	mu      sync.Mutex
 	running map[int64]bool
@@ -90,6 +92,22 @@ func (c *Compactor) bodyCap() int {
 	return defaultBodyMaxTokens
 }
 
+// HoldCapable is implemented by llmpool.Limiter: slot reservation outside any
+// budget plus the profile's per-call ceiling. The compactor resolves it per
+// run via the resolver below — a task's profile can fail over mid-life, so a
+// one-shot construction-time lookup would go stale.
+type HoldCapable interface {
+	AcquireHold(context.Context) (context.Context, func(), time.Duration, error)
+	MaxTimeout() time.Duration
+}
+
+// SetHoldResolver installs a per-run lookup for the slot-capable provider.
+// Without it the compactor probes its own provider (which misses when the
+// task runs through a failover chain wrapping the limiter) and falls back to
+// the built-in 15-minute budget — under a saturated 2-slot endpoint that
+// expires inside the queue.
+func (c *Compactor) SetHoldResolver(f func() HoldCapable) { c.holdRes = f }
+
 // OnPlannerRound is the single entry the planner calls each wake-up. It bumps the
 // round, maintains the cold stamps synchronously, then (if a threshold is hit and
 // no compaction is running / cooling down) launches a background compaction that
@@ -118,17 +136,26 @@ func (c *Compactor) OnPlannerRound(ctx context.Context, ts *db.ExplorationStore)
 		// leased worker slots would otherwise starve every compression attempt.
 		// The maxDur below then bounds only the actual compression work.
 		base := context.WithoutCancel(ctx)
-		// Resolve the budget first: the profile's Max timeout (LLM settings)
-		// over the built-in default; the hold window derives from it too.
+		// Resolve the budget and the slot-capable provider per run: the task's
+		// profile can fail over mid-life, so a construction-time lookup goes
+		// stale. The resolver (wired by the server) returns the task's current
+		// llmpool.Limiter; the provider probe is the legacy fallback.
 		dur0 := c.maxDur
-		if mp, ok := c.prov.(interface{ MaxTimeout() time.Duration }); ok {
-			if mt := mp.MaxTimeout(); mt > 0 {
+		var hc HoldCapable
+		if c.holdRes != nil {
+			hc = c.holdRes()
+		}
+		if hc == nil {
+			if h, ok := c.prov.(HoldCapable); ok {
+				hc = h
+			}
+		}
+		if hc != nil {
+			if mt := hc.MaxTimeout(); mt > 0 {
 				dur0 = mt
 			}
 		}
-		if hc, ok := c.prov.(interface {
-			AcquireHold(context.Context) (context.Context, func(), time.Duration, error)
-		}); ok {
+		if hc != nil {
 			// Wait window = 2x the work budget: three tasks' compactors plus
 			// leased workers all share one 2-slot endpoint; a compaction that
 			// gives up mid-queue dies in the legacy path instead. Waiting is
