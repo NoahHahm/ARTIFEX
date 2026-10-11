@@ -928,6 +928,7 @@ export interface Settings {
   global_proxy?: string;
   python_interpreter?: string; // Custom-script Python interpreter path; empty means runtime detection.
   workers?: number; // Worker concurrency defaults to 3 and affects subsequently started tasks.
+  max_active_tasks?: number; // Cap on concurrently running tasks (0 = unlimited); parked tasks claim nothing and plan nothing.
   // Task concurrency cap: disabled means unlimited; excess new tasks queue and start when slots open.
   task_concurrency_enabled?: boolean; // Defaults to false.
   task_concurrency_limit?: number; // Defaults to 5 when enabled.

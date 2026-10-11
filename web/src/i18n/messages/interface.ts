@@ -2877,7 +2877,9 @@ export const en = {
   "m2875": "Cap in-flight requests to this endpoint; excess calls queue for a free slot. 0 = unlimited. Set it to the endpoint's own budget (e.g. 4 for a shared vLLM serve).",
   "m2876": "Max timeout (seconds)",
   "m2877": "Hard deadline for a single LLM call through this profile. Default 900 (15 min); set higher for slow endpoints under heavy contention (e.g. 3600 = 1 hour). 0 = no deadline.",
-  "m2878": "Pending"
+  "m2878": "Pending",
+  "m2879": "Max concurrent tasks",
+  "m2880": "How many tasks may run at once (default 0 = unlimited). Tasks are admitted oldest-first; the rest wait as Pending and claim nothing until a slot frees. 1 runs one task at a time."
 };
 
 // Traditional Chinese catalog. Same keys as en; missing keys fall back to en at flatten time.
@@ -5760,4 +5762,6 @@ export const zh: Record<keyof typeof en, string> = {
   "m2876": "最大逾時（秒）",
   "m2877": "此設定檔單次 LLM 呼叫嘅硬性時限。預設 900（15 分鐘）；慢端點喺高負載下請設高一啲（例如 3600 = 1 小時）。0 = 不設時限。",
   "m2878": "等待中",
+  "m2879": "同時運行任務上限",
+  "m2880": "同一時間最多行幾多個 task（預設 0 = 不限）。按最舊優先排序；其餘顯示為等待中，唔會認領任何 intent，直至有位空出。設 1 即一個一個行。",
 };

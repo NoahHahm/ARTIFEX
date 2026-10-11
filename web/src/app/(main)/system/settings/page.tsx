@@ -4,7 +4,7 @@ import { translate as swt } from "@/i18n/runtime";
 import { useI18n } from "@/i18n";
 import * as React from "react";
 
-import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
+import { CpuIcon, FlaskConicalIcon, KeyboardIcon, LayersIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,8 @@ export default function SystemSettingsPage() {
   const [savingKey, setSavingKey] = React.useState(false);
   const [pyInterp, setPyInterp] = React.useState("");
   const [workers, setWorkers] = React.useState("3");
+  const [maxActiveTasks, setMaxActiveTasks] = React.useState("0");
+  const [savingMaxActiveTasks, setSavingMaxActiveTasks] = React.useState(false);
   const [savingWorkers, setSavingWorkers] = React.useState(false);
   // Operational constraint injection targets; both enabled by default.
   const [injectPlanner, setInjectPlanner] = React.useState(true);
@@ -61,6 +63,7 @@ export default function SystemSettingsPage() {
     setGlobalProxyInput(s.global_proxy ?? "");
     setPyInterp(s.python_interpreter ?? "");
     setWorkers(String(s.workers ?? 3));
+    setMaxActiveTasks(String(s.max_active_tasks ?? 0));
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
@@ -81,6 +84,23 @@ export default function SystemSettingsPage() {
       })
       .catch((e) => toast.error(swt("interface.m1450") + (e as Error).message))
       .finally(() => setSavingWorkers(false));
+  };
+
+  const saveMaxActiveTasks = () => {
+    const n = Number(maxActiveTasks);
+    if (!Number.isInteger(n) || n < 0) {
+      toast.error(swt("interface.m1627"));
+      return;
+    }
+    setSavingMaxActiveTasks(true);
+    api
+      .setSettings({ max_active_tasks: n })
+      .then((s) => {
+        apply(s);
+        toast.success(swt("interface.m1628"));
+      })
+      .catch((e) => toast.error(swt("interface.m1450") + (e as Error).message))
+      .finally(() => setSavingMaxActiveTasks(false));
   };
 
   const savePython = () => {
@@ -607,6 +627,31 @@ export default function SystemSettingsPage() {
                 onChange={(e) => setWorkers(e.target.value)}
               />
               <Button onClick={saveWorkers} disabled={!loaded || savingWorkers}>
+                {swt("interface.m0273")}</Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <LayersIcon className="size-4" />
+              {swt("interface.m2879")}</CardTitle>
+            <CardDescription>
+              {swt("interface.m2880")}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={0}
+                className="w-32 font-mono text-sm"
+                placeholder="0"
+                value={maxActiveTasks}
+                disabled={!loaded || savingMaxActiveTasks}
+                onChange={(e) => setMaxActiveTasks(e.target.value)}
+              />
+              <Button onClick={saveMaxActiveTasks} disabled={!loaded || savingMaxActiveTasks}>
                 {swt("interface.m0273")}</Button>
             </div>
           </CardContent>
