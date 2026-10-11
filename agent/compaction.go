@@ -547,9 +547,10 @@ func (c *Compactor) compress(ctx context.Context, g *coldGraph, b block, nodeByI
 		Messages:  []llm.Message{llm.UserText(buildCompressionInput(g, b, nodeByID))},
 		// Generous cap: reasoning models (GLM-5.3 on a local vLLM endpoint
 		// ignores the thinking-disabled switch) spend a large share of the
-		// budget on reasoning before any content lands; 1500 regularly
-		// returned an empty body. 6000 keeps the summary well within reach.
-		MaxTokens: 6000,
+		// budget on reasoning before any content lands — measured ~5.6K
+		// reasoning tokens on a 14-node block, so anything under ~7K total
+		// truncated mid-content and returned an empty body.
+		MaxTokens: 12000,
 		Thinking:  "disabled",
 	}
 	msg, _, _, err := c.prov.Complete(ctx, req)
