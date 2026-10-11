@@ -17,6 +17,11 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
 
+// A one-time consent is stored here after a successful login, so the user
+// accepts the terms exactly once per browser (bump the suffix when the terms
+// themselves change to force a fresh acknowledgement).
+const TERMS_CONSENT_KEY = "artifex.terms.v1";
+
 export default function LoginPage() {
   "use no memo";
   const { t: swt, locale: swLocale } = useI18n();
@@ -26,7 +31,13 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [agreed, setAgreed] = useState(false);
+  const [agreed, setAgreed] = useState(() => {
+    try {
+      return window.localStorage.getItem(TERMS_CONSENT_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [termsOpen, setTermsOpen] = useState(false);
   const [readToEnd, setReadToEnd] = useState(false);
   const termsBodyRef = useRef<HTMLDivElement>(null);
@@ -76,6 +87,11 @@ export default function LoginPage() {
     try {
       const { token } = await api.login("ARTIFEX", password);
       auth.setToken(token);
+      if (agreed) {
+        try {
+          window.localStorage.setItem(TERMS_CONSENT_KEY, "1");
+        } catch {}
+      }
       window.location.replace("/function/tasks");
     } catch {
       setError(swt("interface.m0003"));
