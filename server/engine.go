@@ -1280,9 +1280,14 @@ func (e *Engine) taskActivationAllowed(t *Task) bool {
 		// Paused tasks don't consume an active slot: the user parked them
 		// deliberately, and admitting a paused task would stall the whole
 		// queue (its workers claim nothing while later tasks stay parked).
+		// "created" tasks are pre-start: they must be admissible or a new
+		// task could never claim its own seed (deadlock).
 		ids := make([]int64, 0, len(tasks))
 		for _, t := range tasks {
-			if t != nil && t.Status == "running" && !t.Paused {
+			if t == nil || t.Paused {
+				continue
+			}
+			if t.Status == "running" || t.Status == "created" {
 				ids = append(ids, t.ID)
 			}
 		}
