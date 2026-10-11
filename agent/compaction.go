@@ -27,9 +27,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sebastian93921/artifex/db"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/sebastian93921/artifex/db"
 )
 
 // Compactor performs background cold-node compaction for many explorations.
@@ -40,6 +40,10 @@ type Compactor struct {
 	n, m     int           // minor / major thresholds (§7 N=20, M=8)
 	cooldown time.Duration // min gap between compactions per task (§7 60s)
 	maxDur   time.Duration // hard cap on one background compaction
+	// bodyMaxTokens caps the §4 body call's output; 0 → defaultBodyMaxTokens.
+	// Sized from the model's context window (SetMaxTokensForContext) because
+	// reasoning models spend a large uncontrolled share before any content.
+	bodyMaxTokens int
 
 	mu      sync.Mutex
 	running map[int64]bool
@@ -56,10 +60,34 @@ func NewCompactor(prov llm.Provider, model string) *Compactor {
 		n:        20,
 		m:        8,
 		cooldown: 60 * time.Second,
-		maxDur:  15 * time.Minute,
+		maxDur:   15 * time.Minute,
 		running:  map[int64]bool{},
 		lastRun:  map[int64]time.Time{},
 	}
+}
+
+const defaultBodyMaxTokens = 12000
+
+// SetMaxTokensForContext sizes the compress-call output cap from the model's
+// context window: 20% of it, floored at 4096. Reasoning models spend a large
+// uncontrolled share of the budget before any content (a 14-node block
+// measured ~5.6K reasoning tokens), so a fixed cap truncates mid-generation
+// and surfaces as an empty body. 0 context (unknown) keeps the built-in
+// default. Call right after NewCompactor.
+func (c *Compactor) SetMaxTokensForContext(contextWindowK int) {
+	if contextWindowK > 0 {
+		if cap := contextWindowK * 1000 / 5; cap > c.bodyMaxTokens {
+			c.bodyMaxTokens = cap
+		}
+	}
+}
+
+// bodyCap resolves the §4 body output cap.
+func (c *Compactor) bodyCap() int {
+	if c.bodyMaxTokens > 0 {
+		return c.bodyMaxTokens
+	}
+	return defaultBodyMaxTokens
 }
 
 // OnPlannerRound is the single entry the planner calls each wake-up. It bumps the
@@ -543,8 +571,8 @@ func buildCompressionInput(g *coldGraph, b block, nodeByID map[int64]*db.Node) s
 // runs on; thinking disabled (a pure summarization step).
 func (c *Compactor) compress(ctx context.Context, g *coldGraph, b block, nodeByID map[int64]*db.Node) (string, error) {
 	req := llm.CompletionRequest{
-		System:    []string{locale.Text(locale.FromContext(ctx), compressionSystemPrompt)},
-		Messages:  []llm.Message{llm.UserText(buildCompressionInput(g, b, nodeByID))},
+		System:   []string{locale.Text(locale.FromContext(ctx), compressionSystemPrompt)},
+		Messages: []llm.Message{llm.UserText(buildCompressionInput(g, b, nodeByID))},
 		// Generous cap: reasoning models (GLM-5.3 on a local vLLM endpoint
 		// ignores the thinking-disabled switch) spend a large share of the
 		// budget on reasoning before any content lands — measured ~5.6K

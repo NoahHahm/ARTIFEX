@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/norma/llm"
+	"github.com/Autumn-27/norma/transcript"
 	"github.com/sebastian93921/artifex/agent"
 	"github.com/sebastian93921/artifex/db"
 	"github.com/sebastian93921/artifex/llmrec"
-	"github.com/Autumn-27/norma/llm"
-	"github.com/Autumn-27/norma/transcript"
 )
 
 type taskAgentBundle struct {
@@ -217,6 +217,12 @@ func (r *taskLLMRuntime) SlotLeaseHook() func(ctx context.Context) (context.Cont
 func (r *taskLLMRuntime) maxTokens() int {
 	cfg, _ := r.activeCfg() // Zero when no profile was resolved.
 	return cfg.MaxTokens
+}
+
+// contextWindowK returns the active profile's context window (0 = unknown).
+func (r *taskLLMRuntime) contextWindowK() int {
+	cfg, _ := r.activeCfg()
+	return cfg.ContextWindowK
 }
 
 func parseTaskID(id string) (int64, error) {
@@ -617,7 +623,9 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	// Cold-digest section 7: background cold-node compaction. The engine's authoritative resolver runs
 	// this per-task planner (agentsForTask), so attach Compactor here. Its provider follows the task LLM
 	// chain using the agent's model; compaction generates the body with one Complete call.
-	pl.SetCompactor(agent.NewCompactor(plannerRuntime, "task-router"))
+	taskCompactor := agent.NewCompactor(plannerRuntime, "task-router")
+	taskCompactor.SetMaxTokensForContext(plannerRuntime.contextWindowK())
+	pl.SetCompactor(taskCompactor)
 	main := agent.NewMainAgent(mainRuntime, "task-router", s.m.dir, tx, mainRuntime.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	main.SetFindingRecorder(s.evidenceStore())
 	main.SetCompactionWindowResolver(mainRuntime.CompactionWindow)
