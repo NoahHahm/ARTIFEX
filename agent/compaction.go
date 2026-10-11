@@ -90,10 +90,22 @@ func (c *Compactor) OnPlannerRound(ctx context.Context, ts *db.ExplorationStore)
 		// leased worker slots would otherwise starve every compression attempt.
 		// The maxDur below then bounds only the actual compression work.
 		base := context.WithoutCancel(ctx)
+		// Resolve the budget first: the profile's Max timeout (LLM settings)
+		// over the built-in default; the hold window derives from it too.
+		dur0 := c.maxDur
+		if mp, ok := c.prov.(interface{ MaxTimeout() time.Duration }); ok {
+			if mt := mp.MaxTimeout(); mt > 0 {
+				dur0 = mt
+			}
+		}
 		if hc, ok := c.prov.(interface {
 			AcquireHold(context.Context) (context.Context, func(), time.Duration, error)
 		}); ok {
-			queueCtx, cancelQueue := context.WithTimeout(base, 30*time.Minute)
+			// Wait window = 2x the work budget: three tasks' compactors plus
+			// leased workers all share one 2-slot endpoint; a compaction that
+			// gives up mid-queue dies in the legacy path instead. Waiting is
+			// free — the budget below starts only once the slot is held.
+			queueCtx, cancelQueue := context.WithTimeout(base, 2*dur0)
 			defer cancelQueue()
 			if hctx, releaseHold, _, err := hc.AcquireHold(queueCtx); err == nil {
 				defer releaseHold()
@@ -102,15 +114,7 @@ func (c *Compactor) OnPlannerRound(ctx context.Context, ts *db.ExplorationStore)
 			// hold unavailable (pool failover chain etc.): keep the legacy
 			// behavior — the wait counts against maxDur.
 		}
-		// Prefer the profile's own Max timeout (LLM settings) over the
-		// built-in default: slow endpoints under contention need more room.
-		dur := c.maxDur
-		if mp, ok := c.prov.(interface{ MaxTimeout() time.Duration }); ok {
-			if mt := mp.MaxTimeout(); mt > 0 {
-				dur = mt
-			}
-		}
-		bg, cancel := context.WithTimeout(base, dur)
+		bg, cancel := context.WithTimeout(base, dur0)
 		defer cancel()
 		// Compaction calls prov.Complete directly, outside the agentcore session loop,
 		// so ctx lacks a session ID. Gateways using session headers for prompt caching
