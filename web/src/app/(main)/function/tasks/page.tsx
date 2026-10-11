@@ -1076,8 +1076,7 @@ function ConcurrencySettingsDialog() {
   const { t: swt, locale: swLocale } = useI18n();
 
   const [open, setOpen] = React.useState(false);
-  const [enabled, setEnabled] = React.useState(false);
-  const [limit, setLimit] = React.useState("5");
+  const [maxActiveTasks, setMaxActiveTasks] = React.useState("0");
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
@@ -1087,8 +1086,7 @@ function ConcurrencySettingsDialog() {
     api
       .settings()
       .then((settings) => {
-        setEnabled(!!settings.task_concurrency_enabled);
-        setLimit(String(settings.task_concurrency_limit ?? 5));
+        setMaxActiveTasks(String(settings.max_active_tasks ?? 0));
       })
       .catch(() => {
         // Keep the dialog usable with defaults; reopening retries the request.
@@ -1097,11 +1095,11 @@ function ConcurrencySettingsDialog() {
   }, [open]);
 
   async function save() {
-    const nextLimit = Math.max(1, Math.floor(Number(limit) || 5));
+    const next = Math.max(0, Math.floor(Number(maxActiveTasks) || 0));
     setSaving(true);
     try {
-      await api.setSettings({ task_concurrency_enabled: enabled, task_concurrency_limit: nextLimit });
-      toast.success(enabled ? swt("interface.m0875", { p0: nextLimit }) : swt("interface.m0876"));
+      await api.setSettings({ max_active_tasks: next, task_concurrency_enabled: false });
+      toast.success(next > 0 ? swt("interface.m0875", { p0: next }) : swt("interface.m0876"));
       setOpen(false);
     } catch (error) {
       toast.error(swt("interface.m0267", { p0: (error as Error).message }));
@@ -1123,27 +1121,19 @@ function ConcurrencySettingsDialog() {
             {swt("interface.m0880")}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-5 py-2">
-          <div className="flex items-center justify-between gap-4">
-            <div className="grid gap-1">
-              <Label htmlFor="task-concurrency-enabled">{swt("interface.m0881")}</Label>
-              <span className="text-muted-foreground text-xs">{swt("interface.m0882")}</span>
-            </div>
-            <Switch id="task-concurrency-enabled" checked={enabled} onCheckedChange={setEnabled} disabled={loading} />
+          <div className="grid gap-2">
+            <Label htmlFor="task-concurrency-limit">{swt("interface.m2879")}</Label>
+            <span className="text-muted-foreground text-xs">{swt("interface.m2880")}</span>
+            <Input
+              id="task-concurrency-limit"
+              type="number"
+              min={0}
+              className="w-32"
+              value={maxActiveTasks}
+              onChange={(event) => setMaxActiveTasks(event.target.value)}
+              disabled={loading}
+            />
           </div>
-          {enabled && (
-            <div className="grid gap-2">
-              <Label htmlFor="task-concurrency-limit">{swt("interface.m0883")}</Label>
-              <Input
-                id="task-concurrency-limit"
-                type="number"
-                min={1}
-                className="w-32"
-                value={limit}
-                onChange={(event) => setLimit(event.target.value)}
-                disabled={loading}
-              />
-            </div>
-          )}
         </div>
         <DialogFooter>
           <DialogClose asChild>
