@@ -174,3 +174,49 @@ func TestStampOps(t *testing.T) {
 		t.Fatalf("node 3 revived (not cold) → stamp must be cleared, got %+v", got[3])
 	}
 }
+
+// A connected component larger than MaxBlock is split chronologically into
+// chunks of at most MaxBlock members (with a <K tail merged into the previous
+// chunk), so no single compress call outgrows the reasoning budget.
+func TestGrouping_OversizedComponentIsChunked(t *testing.T) {
+	// a 40-node causal chain 1 -> 2 -> ... -> 40, all cold and settled.
+	nodes := make([]cgNode, 0, 41)
+	edges := make([]cgEdge, 0, 40)
+	for id := int64(1); id <= 40; id++ {
+		nodes = append(nodes, fact(id))
+		if id > 1 {
+			edges = append(edges, yields(id-1, id))
+		}
+	}
+	g := newColdGraph(nodes, edges)
+	hot := g.hotSet()
+	structCold := g.structuralCold(hot)
+	stamps := map[int64]*int64{}
+	for id := int64(1); id <= 40; id++ {
+		stamps[id] = ptr(1)
+	}
+	p := defaultColdParams()
+	elig := g.eligibleCold(structCold, stamps, 100, p)
+	blocks := g.group(elig, p)
+	if len(blocks) != 3 { // 40 nodes / MaxBlock 16 → 16+16+8
+		t.Fatalf("expected 3 chunks for a 40-node chain, got %d", len(blocks))
+	}
+	total := 0
+	for _, b := range blocks {
+		if len(b.Members) > p.MaxBlock {
+			t.Fatalf("chunk exceeds MaxBlock: %d members", len(b.Members))
+		}
+		total += len(b.Members)
+		// later chunks see earlier ones as anchors (external real parents).
+		for _, a := range b.Anchors {
+			for _, m := range b.Members {
+				if a == m {
+					t.Fatalf("node %d is both member and anchor", a)
+				}
+			}
+		}
+	}
+	if total != 40 {
+		t.Fatalf("chunks must cover all 40 members, got %d", total)
+	}
+}

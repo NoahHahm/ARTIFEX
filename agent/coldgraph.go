@@ -40,9 +40,17 @@ type cgEdge struct {
 type coldParams struct {
 	R int // debounce: a node must be continuously inactive ≥R planner rounds (§7 R=6)
 	K int // min block size to fold; K=2 skips only degenerate singletons (§7 K=2)
+	// MaxBlock caps one block's member count (0 = uncapped, the historical
+	// behavior). Grouping unions whole connected components; a long causal
+	// chain otherwise grows one ever-larger block whose compress call burns
+	// an unbounded reasoning budget (measured: 31 nodes → >12K tokens → an
+	// empty body from the reasoning model). Oversized components are split
+	// chronologically (by node id); later chunks see earlier chunks only as
+	// external-parent anchors, which the input builder already renders.
+	MaxBlock int
 }
 
-func defaultColdParams() coldParams { return coldParams{R: 6, K: 2} }
+func defaultColdParams() coldParams { return coldParams{R: 6, K: 2, MaxBlock: 16} }
 
 // coldGraph is an in-memory adjacency view over real exploration edges. The
 // derived view layer (kind=digest nodes, rel=covers edges) is filtered out at
@@ -241,6 +249,9 @@ func (g *coldGraph) group(set map[int64]bool, p coldParams) []block {
 		}
 	}
 	// Emit surviving components as blocks, each with its external-parent anchors.
+	// Components above MaxBlock are split chronologically (sorted by id); a
+	// tail smaller than K is merged into the preceding chunk so nothing in a
+	// large component is left permanently unfolded.
 	comps = uf.components()
 	var blocks []block
 	for _, ids := range comps {
@@ -248,29 +259,42 @@ func (g *coldGraph) group(set map[int64]bool, p coldParams) []block {
 			continue
 		}
 		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-		memberSet := make(map[int64]bool, len(ids))
-		for _, m := range ids {
-			memberSet[m] = true
-		}
-		anchorSet := map[int64]bool{}
-		for _, m := range ids {
-			for _, par := range g.parents[m] {
-				if memberSet[par] {
-					continue
-				}
-				pn, ok := g.nodes[par]
-				if !ok || pn.Kind == db.KindDigest {
-					continue
-				}
-				anchorSet[par] = true
+		chunks := [][]int64{ids}
+		if p.MaxBlock > 0 && len(ids) > p.MaxBlock {
+			chunks = chunks[:0]
+			for start := 0; start < len(ids); start += p.MaxBlock {
+				chunks = append(chunks, ids[start:min(start+p.MaxBlock, len(ids))])
+			}
+			if tail := chunks[len(chunks)-1]; len(tail) < p.K && len(chunks) > 1 {
+				chunks[len(chunks)-2] = append(chunks[len(chunks)-2], tail...)
+				chunks = chunks[:len(chunks)-1]
 			}
 		}
-		anchors := make([]int64, 0, len(anchorSet))
-		for a := range anchorSet {
-			anchors = append(anchors, a)
+		for _, ids = range chunks {
+			memberSet := make(map[int64]bool, len(ids))
+			for _, m := range ids {
+				memberSet[m] = true
+			}
+			anchorSet := map[int64]bool{}
+			for _, m := range ids {
+				for _, par := range g.parents[m] {
+					if memberSet[par] {
+						continue
+					}
+					pn, ok := g.nodes[par]
+					if !ok || pn.Kind == db.KindDigest {
+						continue
+					}
+					anchorSet[par] = true
+				}
+			}
+			anchors := make([]int64, 0, len(anchorSet))
+			for a := range anchorSet {
+				anchors = append(anchors, a)
+			}
+			sort.Slice(anchors, func(i, j int) bool { return anchors[i] < anchors[j] })
+			blocks = append(blocks, block{Members: ids, Anchors: anchors})
 		}
-		sort.Slice(anchors, func(i, j int) bool { return anchors[i] < anchors[j] })
-		blocks = append(blocks, block{Members: ids, Anchors: anchors})
 	}
 	// Deterministic order: by smallest member id.
 	sort.Slice(blocks, func(i, j int) bool { return blocks[i].Members[0] < blocks[j].Members[0] })
