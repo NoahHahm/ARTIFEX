@@ -121,6 +121,26 @@ docker compose up -d --build  # builds the artifex image locally + postgres
 The image bundles common tools (ripgrep/curl/vim/npm/nmap…); `./skills` and `./data` are
 bind-mounted so they persist.
 
+#### VPN / tunnel egress: run with `docker-compose.host.yml`
+
+If your server's internet path is a VPN or tunnel (Surfshark, Tailscale, corporate
+WireGuard…), bridged containers can hang on **every TLS handshake** while plain HTTP
+still works: the tunnel's MTU (~1280) silently drops large packets *and* the ICMP
+"fragmentation needed" message, so container TCP never learns the path MTU. Confirm
+it: from the host `curl https://example.com` succeeds while from the container it
+hangs, and a DF-ping sweep shows sizes ≥1300 dropping while ≤1200 pass.
+
+Run the app on the host's network stack instead — its TCP learns the path MTU just
+like the host's:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+```
+
+In this mode Postgres is published on `127.0.0.1:5432` only, and the app listens on
+`${ARTIFEX_BIND_ADDR:-:8787}` / `${ARTIFEX_PROXY_ADDR:-:8788}` (set them in `.env`,
+e.g. `ARTIFEX_BIND_ADDR=192.168.1.10:8787` to bind one interface).
+
 A remote MCP can use `http` (Streamable HTTP) or `sse` (legacy SSE) in system settings. Legacy SSE
 servers usually open the event stream with `GET /sse` and then receive JSON-RPC requests on the
 `/message?sessionId=...` the server returns; set the URL to `/sse` and the header to

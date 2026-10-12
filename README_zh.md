@@ -91,6 +91,24 @@ docker compose up -d --build  # 本地構建 artifex 鏡像 + postgres
 
 鏡像已內置常用工具（ripgrep/curl/vim/npm/nmap…）；`./skills` 與 `./data` 以綁定掛載方式持久化。
 
+#### VPN / 隧道出口環境：使用 `docker-compose.host.yml`
+
+若伺服器的互聯網路徑經過 VPN 或隧道（Surfshark、Tailscale、企業 WireGuard…），橋接
+容器可能**所有 HTTPS 握手都卡死**而純 HTTP 正常：隧道的 MTU（約 1280）會靜默丟棄大型
+封包，*連同* ICMP「需要分段」訊息一併吞掉，令容器內的 TCP 永遠學不到路徑 MTU。確認方法：
+在主機上 `curl https://example.com` 成功，但在容器內掛起；且 DF ping 測試中 ≥1300 位元組
+被丟棄、≤1200 通過。
+
+改用主機網絡棧運行即可——容器內的 TCP 會像主機一樣自行學習路徑 MTU：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+```
+
+此模式下 Postgres 僅發佈於 `127.0.0.1:5432`，應用監聽 `${ARTIFEX_BIND_ADDR:-:8787}` /
+`${ARTIFEX_PROXY_ADDR:-:8788}`（在 `.env` 設定，例如 `ARTIFEX_BIND_ADDR=192.168.1.10:8787`
+可綁定指定介面）。
+
 遠程 MCP 可在系統設置中選擇 `http`（Streamable HTTP）或 `sse`（舊版 SSE）。舊版 SSE 服務通常使用 `GET /sse` 建立事件流，再通過服務返回的 `/message?sessionId=...` 接收 JSON-RPC 請求；配置時將 URL 填為 `/sse`，請求頭按 `Authorization=Bearer <token>` 填寫。
 
 ### 方式三：下載預編譯二進制（Releases）

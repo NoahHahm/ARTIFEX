@@ -1,0 +1,37 @@
+# Host-networking override for deployments whose egress path is a VPN/tunnel
+# (Surfshark, Tailscale, corporate WireGuard…).
+#
+# WHY: such tunnels have a reduced MTU (often 1280) and typically swallow ICMP
+# "fragmentation needed", so a bridged container keeps sending 1460-byte
+# segments that are silently dropped — every TLS handshake hangs while plain
+# HTTP still works. Running the app on the host's network stack lets its TCP
+# learn the path MTU the same way the host does.
+#
+# Symptom checklist (all three true → use this file):
+#   - from the container: curl http://<site> works, https:// hangs at
+#     "TLS handshake, Client hello"
+#   - from the container: ping -M do -s 1300 <ip> drops, -s 1200 passes
+#   - from the HOST: the same https:// URL succeeds
+#
+# Usage (after `cp .env.example .env`):
+#   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+#
+# Listen addresses default to :8787 / :8788; override in .env, e.g.
+#   ARTIFEX_BIND_ADDR=192.168.1.10:8787
+# Postgres is published on loopback only — in host mode the compose DNS name
+# does not exist, so the app reaches it at 127.0.0.1.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  artifex:
+    network_mode: host
+    command:
+      - "-addr"
+      - "${ARTIFEX_BIND_ADDR:-:8787}"
+      - "-proxy"
+      - "${ARTIFEX_PROXY_ADDR:-:8788}"
+    environment:
+      ARTIFEX_PG_DSN: postgres://${POSTGRES_USER:-artifex}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB:-artifex}?sslmode=disable
