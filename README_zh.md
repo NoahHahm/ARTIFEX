@@ -91,19 +91,14 @@ docker compose up -d --build  # 本地構建 artifex 鏡像 + postgres
 
 鏡像已內置常用工具（ripgrep/curl/vim/npm/nmap…）；`./skills` 與 `./data` 以綁定掛載方式持久化。
 
-#### VPN / 隧道出口環境：使用 `docker-compose.host.yml`
+#### 為何預設使用主機網絡棧
 
-若伺服器的互聯網路徑經過 VPN 或隧道（Surfshark、Tailscale、企業 WireGuard…），橋接
-容器可能**所有 HTTPS 握手都卡死**而純 HTTP 正常：隧道的 MTU（約 1280）會靜默丟棄大型
-封包，*連同* ICMP「需要分段」訊息一併吞掉，令容器內的 TCP 永遠學不到路徑 MTU。確認方法：
-在主機上 `curl https://example.com` 成功，但在容器內掛起；且 DF ping 測試中 ≥1300 位元組
-被丟棄、≤1200 通過。
-
-改用主機網絡棧運行即可——容器內的 TCP 會像主機一樣自行學習路徑 MTU：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
-```
+默認的 `docker-compose.yml` 以 `network_mode: host` 啟動應用。這是刻意設定：若伺服器的
+互聯網路徑經過 VPN 或隧道（Surfshark、Tailscale、企業 WireGuard…），其 MTU（約 1280）
+會靜默丟棄大型封包，*連同* ICMP「需要分段」訊息一併吞掉，令橋接容器的**所有 TLS 握手
+卡死**而純 HTTP 正常——容器內的 TCP 永遠學不到路徑 MTU。在主機網絡棧上，容器的 TCP
+行為與主機完全一致，可正確處理隧道。若你在容器內觀察到相反症狀（HTTP 正常、HTTPS 卡在
+"Client hello"、DF ping ≥1300 被丟棄而 ≤1200 通過），正是此問題——請保持主機網絡模式。
 
 此模式下 Postgres 僅發佈於 `127.0.0.1:5432`，應用監聽 `${ARTIFEX_BIND_ADDR:-:8787}` /
 `${ARTIFEX_PROXY_ADDR:-:8788}`（在 `.env` 設定，例如 `ARTIFEX_BIND_ADDR=192.168.1.10:8787`

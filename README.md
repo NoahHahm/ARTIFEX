@@ -121,21 +121,17 @@ docker compose up -d --build  # builds the artifex image locally + postgres
 The image bundles common tools (ripgrep/curl/vim/npm/nmap…); `./skills` and `./data` are
 bind-mounted so they persist.
 
-#### VPN / tunnel egress: run with `docker-compose.host.yml`
+#### Why the default runs on the host network stack
 
-If your server's internet path is a VPN or tunnel (Surfshark, Tailscale, corporate
-WireGuard…), bridged containers can hang on **every TLS handshake** while plain HTTP
-still works: the tunnel's MTU (~1280) silently drops large packets *and* the ICMP
-"fragmentation needed" message, so container TCP never learns the path MTU. Confirm
-it: from the host `curl https://example.com` succeeds while from the container it
-hangs, and a DF-ping sweep shows sizes ≥1300 dropping while ≤1200 pass.
-
-Run the app on the host's network stack instead — its TCP learns the path MTU just
-like the host's:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
-```
+The default `docker-compose.yml` starts the app with `network_mode: host`. This is
+deliberate: if the server's internet path is a VPN or tunnel (Surfshark, Tailscale,
+corporate WireGuard…), its MTU (~1280) silently drops large packets *and* the ICMP
+"fragmentation needed" message, so a bridged container hangs on **every TLS
+handshake** while plain HTTP still works — container TCP never learns the path MTU.
+On the host's network stack the container's TCP behaves exactly like the host's,
+which handles tunnels correctly. If you observe the opposite symptoms from a
+container (HTTP fine, HTTPS stuck at "Client hello", DF-ping ≥1300 dropped while
+≤1200 passes), that is this exact problem — keep host networking.
 
 In this mode Postgres is published on `127.0.0.1:5432` only, and the app listens on
 `${ARTIFEX_BIND_ADDR:-:8787}` / `${ARTIFEX_PROXY_ADDR:-:8788}` (set them in `.env`,
