@@ -11,6 +11,9 @@ import type { ChatMention } from "@/lib/chat-mentions";
 import { MOCK } from "@/lib/mock/enabled";
 import { mockHandle } from "@/lib/mock/handler";
 import type {
+  APIKeyMetadata,
+  CreateAPIKeyInput,
+  CreatedAPIKey,
   ActiveFindingRetest,
   Activity,
   Agent,
@@ -218,6 +221,9 @@ function interceptPageQuery(page: number, size: number, filter: InterceptApprova
 }
 
 export const api = {
+  apiKeys: () => http<{ keys: APIKeyMetadata[] | null }>("/api-keys", { cache: "no-store" }).then((r) => arr(r.keys)),
+  createAPIKey: (input: CreateAPIKeyInput) => post<CreatedAPIKey>("/api-keys", input),
+  revokeAPIKey: (id: number) => del<{ revoked: boolean }>(`/api-keys/${id}`),
   // Backend application version injected via release ldflags, defaulting to dev.
   health: () => get<{ ok: boolean; service: string; version: string }>("/health"),
 

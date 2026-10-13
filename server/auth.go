@@ -125,6 +125,22 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 			h.ServeHTTP(w, r)
 			return
 		}
+		bearer := ""
+		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			bearer = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		}
+		keyHeader := r.Header.Get("X-API-Key")
+		if keyHeader != "" || strings.HasPrefix(bearer, apiKeyPrefix) {
+			if keyHeader != "" && r.Header.Get("Authorization") != "" {
+				writeErr(w, 401, "Ambiguous credentials")
+				return
+			}
+			if keyHeader != "" {
+				bearer = keyHeader
+			}
+			s.authenticateKeyRequest(w, r, h, bearer)
+			return
+		}
 		tok := extractToken(r)
 		if tok == "" {
 			writeErr(w, 401, locale.Text(responseLanguage(w), "Unauthorized"))

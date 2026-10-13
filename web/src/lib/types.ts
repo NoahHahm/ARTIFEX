@@ -4,6 +4,28 @@
 export type TaskStatus = "created" | "queued" | "pending" | "running" | "paused" | "done" | "failed" | "timeout";
 export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 
+export type APIKeyScope = "tasks:read" | "tasks:write";
+
+export interface APIKeyMetadata {
+  id: number;
+  owner: string;
+  name: string;
+  scopes: APIKeyScope[];
+  created_at: string;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+}
+
+export interface CreateAPIKeyInput {
+  name: string;
+  scopes: APIKeyScope[];
+  expires_at?: string;
+}
+
+export interface CreatedAPIKey extends APIKeyMetadata {
+  key: string; // One-time secret; never persist this response.
+}
+
 export interface Task {
   id: string;
   name?: string; // Optional task name; blank/omitted falls back to description for display.

@@ -517,7 +517,19 @@ DROP TRIGGER IF EXISTS trg_task_categories_upd ON task_categories;
 CREATE TRIGGER trg_task_categories_upd BEFORE UPDATE ON task_categories
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE TABLE IF NOT EXISTS api_keys (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    owner TEXT NOT NULL CHECK (owner <> ''),
+    name TEXT NOT NULL DEFAULT '',
+    scopes TEXT[] NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
+    owner          TEXT NOT NULL DEFAULT 'ARTIFEX' CHECK (owner <> ''),
     id             BIGSERIAL PRIMARY KEY,
     name           TEXT NOT NULL DEFAULT '',
     category_id    BIGINT REFERENCES task_categories(id) ON DELETE SET NULL,
@@ -548,6 +560,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT 'ARTIFEX' CHECK (owner <> '');
+CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner);
 CREATE INDEX IF NOT EXISTS idx_tasks_alive  ON tasks(created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)          WHERE deleted_at IS NULL;
 DROP TRIGGER IF EXISTS trg_tasks_upd ON tasks;

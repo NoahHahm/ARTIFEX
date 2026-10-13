@@ -707,6 +707,10 @@ func (s *Server) Handler() http.Handler {
 	// One-click updates use normal JWT authentication. auth.go exempts only /api/auth/* and
 	// /api/health, so endpoints modifying the running application require login.
 
+	mux.HandleFunc("POST /api/api-keys", s.createAPIKey)
+	mux.HandleFunc("GET /api/api-keys", s.listAPIKeys)
+	mux.HandleFunc("DELETE /api/api-keys/{id}", s.revokeAPIKey)
+	mux.HandleFunc("GET /api/tasks/{id}/status", s.taskStatusAPI)
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
 	mux.HandleFunc("GET /api/task-categories", s.pgListTaskCategories)
@@ -1076,6 +1080,23 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		active = t.ID
 	}
 	list := s.m.List()
+	if key := apiKeyPrincipal(r); key != nil {
+		owned, err := s.m.pg.OwnedTaskIDs(r.Context(), key.Owner)
+		if err != nil {
+			writeErr(w, 503, "Task storage unavailable")
+			return
+		}
+		filtered := make([]*Task, 0, len(list))
+		for _, task := range list {
+			if owned[task.ID] {
+				filtered = append(filtered, task)
+			}
+		}
+		list = filtered
+		if !owned[active] {
+			active = ""
+		}
+	}
 	metrics, _ := s.m.PG().TaskListMetricsAll()
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	dtos := make([]TaskDTO, 0, len(list))
@@ -1507,6 +1528,22 @@ type createTaskReq struct {
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	var req createTaskReq
+	if apiKeyPrincipal(r) != nil {
+		var fields map[string]json.RawMessage
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&fields); err != nil {
+			writeErr(w, 400, "Invalid task request")
+			return
+		}
+		allowed := map[string]bool{"name": true, "description": true, "goal": true, "timeout_seconds": true, "plan_heartbeat_seconds": true, "coverage_enabled": true, "seed_first_intent": true}
+		for field := range fields {
+			if !allowed[field] {
+				writeErr(w, 400, "Field is not permitted for API key task creation: "+field)
+				return
+			}
+		}
+		body, _ := json.Marshal(fields)
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, locale.Text(responseLanguage(w), "bad json: ")+locale.ErrorMessage(responseLanguage(w), err))
 		return

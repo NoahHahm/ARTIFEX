@@ -8,6 +8,7 @@ import { CpuIcon, FlaskConicalIcon, KeyboardIcon, LayersIcon, RadioTowerIcon, Se
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { APIKeySettings } from "@/components/api-key-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -287,6 +288,7 @@ export default function SystemSettingsPage() {
 
       {/* Use columns instead of grid: search cards vary greatly in height with conditional provider-key inputs. Columns balance content without grid row gaps. Cards provide margin-bottom because column-gap handles only horizontal spacing. */}
       <div className="columns-1 gap-4 md:gap-6 lg:columns-2">
+        <APIKeySettings />
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
